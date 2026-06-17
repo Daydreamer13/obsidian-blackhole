@@ -71,6 +71,18 @@
   .btn.primary:hover{box-shadow:0 14px 46px -10px rgba(255,138,60,.8)}
   header.nav.solid .nav-cta{color:#1a0c02;border-color:transparent;background:linear-gradient(110deg,var(--amber-2),var(--amber));box-shadow:0 8px 36px -10px rgba(255,138,60,.6)}
   header.nav.solid .nav-cta:hover{box-shadow:0 14px 46px -10px rgba(255,138,60,.8)}
+  .nav-right{display:flex;align-items:center;gap:14px}
+  .sound-btn{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:50%;border:1px solid var(--line-2);background:var(--glass);color:var(--muted);cursor:pointer;padding:0;flex:0 0 auto;transition:border-color .3s,color .3s,background .3s,box-shadow .3s}
+  .sound-btn:hover{border-color:var(--amber);color:var(--ink)}
+  .sound-btn.on{color:var(--amber);border-color:rgba(255,138,60,.6);box-shadow:0 0 22px -4px rgba(255,138,60,.55)}
+  .sound-btn .eq{display:flex;align-items:center;gap:2px;height:14px}
+  .sound-btn .eq i{width:2.5px;height:4px;background:currentColor;border-radius:2px}
+  .sound-btn.on .eq i{animation:eq .9s ease-in-out infinite alternate}
+  .sound-btn.on .eq i:nth-child(1){animation-delay:-.1s}
+  .sound-btn.on .eq i:nth-child(2){animation-delay:-.45s}
+  .sound-btn.on .eq i:nth-child(3){animation-delay:-.7s}
+  .sound-btn.on .eq i:nth-child(4){animation-delay:-.25s}
+  @keyframes eq{from{height:3px}to{height:13px}}
   .btn:not(.primary):hover{border-color:var(--line-2);background:rgba(255,244,224,.06)}
   .btn .sheen{position:absolute;inset:0;background:linear-gradient(110deg,transparent 30%,rgba(255,255,255,.4) 50%,transparent 70%);transform:translateX(-130%);transition:transform .7s var(--ease)}
   .btn:hover .sheen{transform:translateX(130%)}
@@ -203,7 +215,10 @@
       <a href="#manifesto">Manifesto</a>
       <a href="#preorder">Pre-order</a>
     </nav>
-    <a href="#preorder" class="btn nav-cta"><span class="sheen"></span>Pre-order <span class="arr">→</span></a>
+    <div class="nav-right">
+      <button id="sound" class="sound-btn" aria-label="Toggle ambient sound" aria-pressed="false" title="Ambient sound: off"><span class="eq"><i></i><i></i><i></i><i></i></span></button>
+      <a href="#preorder" class="btn nav-cta"><span class="sheen"></span>Pre-order <span class="arr">→</span></a>
+    </div>
   </div>
 </header>
 
@@ -654,7 +669,7 @@
     const lens = (1.0+0.55*pulse)*(1.0-0.82*scroll);
     const swirl= (reduce?0.0:0.09) + 0.85*pulse;
     const tilt = 0.34 + (reduce?0:M.y*0.10);
-    const amp  = reduce?0.4:envelope(t);
+    const amp  = reduce?0.4 : (AUDIO.playing ? Math.min(1.0, 0.24 + AUDIO.sample()*2.3) : envelope(t));
     // hole tracks the cursor directly; idles above the wordmark (frozen under reduced-motion)
     const hx = reduce?0:M.x, hy = reduce?0.24:M.y;
     const resolve = Math.min(1, scroll*1.3);     // text flattens as you scroll
@@ -723,6 +738,143 @@
       el.style.setProperty('--mx', ((e.clientX-r.left)/r.width*100)+'%');
       el.style.setProperty('--my', ((e.clientY-r.top)/r.height*100)+'%'); });
   }); }
+
+  /* ============================================================
+     AUDIO — Interstellar-inspired procedural organ ambience.
+     Original synthesis (Web Audio), no samples, no copyrighted music.
+     Deep pipe-organ pads on a slow minor progression + sub drone +
+     cathedral reverb + a time-dilation "tick" + slow swells.
+     The accretion disk pulses to the live signal via the analyser.
+  ============================================================ */
+  const AUDIO = (() => {
+    const nF = m => 440*Math.pow(2,(m-69)/12);
+    // slow progression (MIDI): Am – F – C – Gsus  (modal, suspended, cinematic)
+    const CHORDS = [
+      { pad:[57,60,64,69], sub:33 },  // Am
+      { pad:[53,57,60,65], sub:29 },  // F
+      { pad:[48,55,60,64], sub:36 },  // C
+      { pad:[50,55,62,67], sub:31 },  // G(sus)
+    ];
+    const PADLVL=0.11;
+    let ctx=null, master=null, analyser=null, data=null, tickBuf=null;
+    let padBus=null, groups=[], sub=null, built=false, playing=false;
+    let cur=0, ci=0, level=0, schedTimer=null, nextChord=0, nextTick=0;
+
+    function makeIR(c){
+      const sr=c.sampleRate, len=Math.floor(sr*3.4), b=c.createBuffer(2,len,sr);
+      for(let ch=0;ch<2;ch++){ const d=b.getChannelData(ch);
+        for(let i=0;i<len;i++){ d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.6); } }
+      return b;
+    }
+    function makeTick(c){ const len=Math.floor(c.sampleRate*0.13), b=c.createBuffer(1,len,c.sampleRate), d=b.getChannelData(0);
+      for(let i=0;i<len;i++){ d[i]=(Math.random()*2-1)*Math.pow(1-i/len,5.0); } return b; }
+    function organVoice(c, dest){
+      const vg=c.createGain(); vg.gain.value=1; vg.connect(dest);
+      const parts=[[1,1.0,0],[1,0.55,7],[2,0.4,0],[3,0.2,0]]; const oscs=[];
+      parts.forEach(([h,a,dt])=>{ const o=c.createOscillator(); o.type='sine'; o.detune.value=dt;
+        const g=c.createGain(); g.gain.value=a; o.connect(g).connect(vg); oscs.push({o,h}); });
+      return { start(t){ oscs.forEach(({o})=>o.start(t)); },
+        setF(f,when){ oscs.forEach(({o,h})=>o.frequency.setValueAtTime(f*h,when)); } };
+    }
+    function makeGroup(c, dest){
+      const g=c.createGain(); g.gain.value=0; g.connect(dest);
+      const v=[organVoice(c,g),organVoice(c,g),organVoice(c,g),organVoice(c,g)];
+      return { gain:g, start(t){ v.forEach(x=>x.start(t)); },
+        setChord(ms,when){ ms.forEach((m,i)=>v[i].setF(nF(m),when)); } };
+    }
+    function build(c, out, t0){
+      const conv=c.createConvolver(); conv.buffer=makeIR(c);
+      padBus=c.createGain(); padBus.gain.value=1;
+      const dry=c.createGain(); dry.gain.value=0.42; const wet=c.createGain(); wet.gain.value=0.8;
+      padBus.connect(dry).connect(out); padBus.connect(conv).connect(wet).connect(out);
+      groups=[makeGroup(c,padBus), makeGroup(c,padBus)];
+      groups.forEach(g=>g.start(t0));
+      groups[0].setChord(CHORDS[0].pad, t0); groups[1].setChord(CHORDS[1].pad, t0);
+      groups[0].gain.gain.setValueAtTime(0.0001,t0); groups[0].gain.gain.exponentialRampToValueAtTime(PADLVL, t0+4.5);
+      cur=0; ci=0;
+      sub=c.createGain(); sub.gain.value=0.0001; sub.connect(out);
+      const so=c.createOscillator(); so.type='sine'; so.frequency.setValueAtTime(nF(CHORDS[0].sub),t0); so.connect(sub); so.start(t0);
+      sub.gain.exponentialRampToValueAtTime(0.09, t0+5.5); sub._osc=so;
+      const lfo=c.createOscillator(); lfo.type='sine'; lfo.frequency.value=1/27;
+      const lg=c.createGain(); lg.gain.value=0.3; lfo.connect(lg).connect(padBus.gain); lfo.start(t0);
+    }
+    function changeChord(when){
+      ci=(ci+1)%CHORDS.length; const nx=(cur+1)%2, ch=CHORDS[ci];
+      groups[nx].setChord(ch.pad, when);
+      groups[nx].gain.gain.setTargetAtTime(PADLVL, when, 1.8);
+      groups[cur].gain.gain.setTargetAtTime(0.0001, when, 1.8);
+      sub._osc.frequency.setTargetAtTime(nF(ch.sub), when, 1.4);
+      cur=nx;
+    }
+    function tick(when){
+      if(!tickBuf) return;
+      const s=ctx.createBufferSource(); s.buffer=tickBuf;
+      const bp=ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=1650; bp.Q.value=1.1;
+      const g=ctx.createGain(); g.gain.setValueAtTime(0.0001,when);
+      g.gain.exponentialRampToValueAtTime(0.12, when+0.004); g.gain.exponentialRampToValueAtTime(0.0001, when+0.09);
+      s.connect(bp).connect(g); g.connect(padBus); s.start(when); s.stop(when+0.13);
+    }
+    function scheduler(){
+      const ahead=ctx.currentTime+0.3;
+      while(nextChord<ahead){ changeChord(nextChord); nextChord+=12; }
+      while(nextTick<ahead){ tick(nextTick); nextTick+=1.5; }
+    }
+    async function start(){
+      if(!built){
+        const AC=window.AudioContext||window.webkitAudioContext; if(!AC) throw new Error('no WebAudio');
+        ctx=new AC(); master=ctx.createGain(); master.gain.value=0.0001;
+        const lim=ctx.createDynamicsCompressor(); lim.threshold.value=-9; lim.ratio.value=12; lim.attack.value=0.004; lim.release.value=0.25;
+        analyser=ctx.createAnalyser(); analyser.fftSize=512; data=new Uint8Array(analyser.fftSize);
+        master.connect(lim); lim.connect(ctx.destination); lim.connect(analyser);
+        tickBuf=makeTick(ctx); build(ctx, master, ctx.currentTime+0.06);
+        nextChord=ctx.currentTime+12; nextTick=ctx.currentTime+1.5; schedTimer=setInterval(scheduler,90); built=true;
+      }
+      if(ctx.state==='suspended') await ctx.resume();
+      master.gain.cancelScheduledValues(ctx.currentTime);
+      master.gain.setValueAtTime(Math.max(master.gain.value,0.0001), ctx.currentTime);
+      master.gain.exponentialRampToValueAtTime(0.85, ctx.currentTime+1.6);
+      playing=true;
+    }
+    function stop(){
+      if(!built) return; playing=false;
+      master.gain.cancelScheduledValues(ctx.currentTime);
+      master.gain.setValueAtTime(master.gain.value, ctx.currentTime);
+      master.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+0.9);
+    }
+    function sample(){ if(!playing||!analyser){ level*=0.9; return level; }
+      analyser.getByteTimeDomainData(data); let s=0; for(let i=0;i<data.length;i++){ const v=(data[i]-128)/128; s+=v*v; }
+      level += (Math.sqrt(s/data.length)-level)*0.18; return level; }
+    // offline self-test (verify without listening)
+    async function renderTest(sec){
+      const sr=44100, oc=new OfflineAudioContext(2, Math.floor(sr*sec), sr);
+      const m=oc.createGain(); m.gain.value=0.85;
+      const lim=oc.createDynamicsCompressor(); lim.threshold.value=-9; lim.ratio.value=12;
+      m.connect(lim); lim.connect(oc.destination);
+      const sc=ctx, st=tickBuf; ctx=oc; tickBuf=makeTick(oc);  // point tick()/build at offline ctx
+      build(oc, m, 0);
+      m.gain.setValueAtTime(0.0001,0); m.gain.exponentialRampToValueAtTime(0.85,1.6);
+      for(let t=12;t<sec;t+=12) changeChord(t);
+      for(let t=1.5;t<sec;t+=1.5) tick(t);
+      const buf=await oc.startRendering(); ctx=sc; tickBuf=st;
+      const L=buf.getChannelData(0); let peak=0,rms=0,dc=0,zc=0,prev=0;
+      for(let i=0;i<L.length;i++){ const v=L[i]; dc+=v; const a=Math.abs(v); if(a>peak)peak=a; rms+=v*v;
+        if((v>=0)!==(prev>=0))zc++; prev=v; }
+      rms=Math.sqrt(rms/L.length); dc/=L.length;
+      return { peak:+peak.toFixed(3), rms:+rms.toFixed(4), dc:+dc.toFixed(4), clipped:peak>0.999, zeroCrossPerSec:Math.round(zc/sec) };
+    }
+    return { start, stop, sample, renderTest, get playing(){return playing;} };
+  })();
+  window.__audioTest = (s)=>AUDIO.renderTest(s||6);
+
+  const soundBtn=document.getElementById('sound');
+  if(soundBtn){
+    soundBtn.addEventListener('click', async ()=>{
+      try{
+        if(!AUDIO.playing){ await AUDIO.start(); soundBtn.classList.add('on'); soundBtn.setAttribute('aria-pressed','true'); soundBtn.title='Ambient sound: on'; }
+        else { AUDIO.stop(); soundBtn.classList.remove('on'); soundBtn.setAttribute('aria-pressed','false'); soundBtn.title='Ambient sound: off'; }
+      }catch(e){ console.warn('[OBSIDIAN] audio unavailable', e); }
+    });
+  }
 })();
 </script>
 </body>
