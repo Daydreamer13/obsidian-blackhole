@@ -508,8 +508,8 @@
   vec3 diskSample(vec2 d){
     vec2 e=vec2(d.x, d.y/max(uTilt,0.05));
     float rr=length(e);
-    float inner=uRs*1.9, outer=uRs*3.8;
-    float radial=smoothstep(inner, inner*1.16, rr)*smoothstep(outer, outer*0.66, rr);
+    float inner=uRs*1.9, outer=uRs*4.6;
+    float radial=smoothstep(inner, inner*1.16, rr)*smoothstep(outer, outer*0.70, rr);
     if(radial<=0.0) return vec3(0.0);             // outside the annulus: skip fbm
     float ang = rr>1e-5 ? atan(e.y,e.x) : 0.0;    // guard atan(0,0)
     float rang = ang + uTime*(0.12 + 0.09/(rr+0.1));              // orbits the hole, inner faster (Keplerian-ish)
@@ -565,16 +565,13 @@
     vec3 haloCol = mix(vec3(1.0,0.58,0.24), vec3(1.0,0.94,0.85), 0.5);
     col += haloCol * halo * wrap * beam * (1.5+0.4*uAmp);
 
+    // ---- broad soft glow (cheap bloom) ----
+    float glow = exp(-pow((r-rs*1.7)/(rs*1.25),2.0));
+    col += vec3(1.0,0.52,0.22) * glow * 0.13 * (0.6+beam*0.5);
+
     // ---- photon ring: razor-thin, very bright, at the shadow edge ----
     float pr = exp(-pow((r-rs*1.07)/(rs*0.03),2.0));
     col += vec3(1.0,0.96,0.88)*pr*(2.2+0.5*uAmp);
-
-    // ---- audio shockwave: a ripple emitted from the hole on each tick ----
-    if(uShockAge < 1.5){
-      float ringR = rs*1.12 + uShockAge*0.55;
-      float sl = exp(-pow((r-ringR)/0.02, 2.0));
-      col += vec3(1.0,0.72,0.42) * sl * exp(-uShockAge*2.3) * 1.7;
-    }
 
     // event horizon — pure void
     float horizon=smoothstep(rs*1.0, rs*0.985, r);
