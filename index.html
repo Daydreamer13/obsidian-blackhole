@@ -511,11 +511,14 @@
     float inner=uRs*1.9, outer=uRs*4.6;
     float radial=smoothstep(inner, inner*1.16, rr)*smoothstep(outer, outer*0.70, rr);
     if(radial<=0.0) return vec3(0.0);             // outside the annulus: skip fbm
-    float ang = rr>1e-5 ? atan(e.y,e.x) : 0.0;    // guard atan(0,0)
-    float rang = ang + uTime*(0.12 + 0.09/(rr+0.1));              // orbits the hole, inner faster (Keplerian-ish)
-    float w=fbm(vec2(rang*3.0, rr*8.0 - uTime*0.2));              // matter spiralling inward
-    float dens=radial*(0.28+1.05*fbm(vec2(rang*5.0, rr*15.0)+w));
-    if(uArc==1) dens*=0.6+0.75*fbm(vec2(rang*9.0, rr*26.0));      // extra filaments (desktop)
+    float ang = atan(e.y, e.x);
+    float rot = uTime*(0.12 + 0.09/(rr+0.1));     // orbits the hole, inner faster (Keplerian-ish)
+    // sample noise along a circle (cos,sin) so there is NO atan branch-cut seam on the -x axis
+    vec2 cir = vec2(cos(ang-rot), sin(ang-rot)) * 3.0;
+    float flow = rr*9.0 - uTime*0.25;             // matter spiralling inward
+    float w = fbm(cir + vec2(flow, 0.0));
+    float dens = radial*(0.28 + 1.05*fbm(cir*1.7 + vec2(flow*1.6, w)));
+    if(uArc==1) dens *= 0.6 + 0.75*fbm(cir*2.8 + vec2(flow*2.4, 0.0));   // extra filaments (desktop)
     float temp=smoothstep(outer, inner, rr);      // 1 = inner, hottest
     vec3 col=mix(vec3(0.95,0.20,0.03), vec3(1.0,0.60,0.26), smoothstep(0.0,0.5,temp));
     col=mix(col, vec3(1.0,0.96,0.92), smoothstep(0.5,1.0,temp));
