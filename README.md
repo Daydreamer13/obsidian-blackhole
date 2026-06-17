@@ -2,6 +2,8 @@
 
 A single-file, **dependency-free** landing page whose hero is a real-time **gravitational black hole**, rendered entirely in one WebGL2 fragment shader.
 
+### ▶ [Live demo](https://daydreamer13.github.io/obsidian-blackhole/)
+
 ![WebGL2](https://img.shields.io/badge/WebGL2-raw%20shader-FF8A3C) ![deps](https://img.shields.io/badge/dependencies-0-05060A) ![size](https://img.shields.io/badge/files-1-FFD089)
 
 ## What it does
