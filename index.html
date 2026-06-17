@@ -41,6 +41,23 @@
 
   /* ---------- WebGL canvas (fixed behind hero) ---------- */
   #gl{position:fixed;inset:0;width:100%;height:100%;z-index:0;display:block;background:#000}
+  /* ---------- Intro / entry overlay ---------- */
+  .intro{position:fixed;inset:0;z-index:80;display:grid;place-items:center;
+    background:radial-gradient(58% 58% at 50% 44%, rgba(5,6,10,.34), rgba(5,6,10,.86));
+    backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);
+    transition:opacity 1s var(--ease),visibility 1s}
+  .intro.gone{opacity:0;visibility:hidden;pointer-events:none}
+  .intro-card{text-align:center;padding:0 28px;animation:introIn 1.2s var(--ease-out) both}
+  .intro-mark{display:block;width:52px;height:52px;margin:0 auto 30px;border-radius:50%;
+    background:radial-gradient(circle at 40% 38%,#000 44%,var(--amber) 49%,var(--amber-2) 56%,transparent 72%);
+    box-shadow:0 0 46px rgba(255,138,60,.6);animation:spin 22s linear infinite}
+  .intro-eyebrow{font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.34em;text-transform:uppercase;color:var(--amber);margin-bottom:16px}
+  .intro-title{font-family:'Space Grotesk';font-weight:600;letter-spacing:.24em;font-size:clamp(34px,7vw,64px);line-height:1}
+  .intro-sub{color:var(--muted);font-size:15px;margin:18px auto 32px;max-width:440px;font-family:'Space Mono',monospace;line-height:1.7}
+  .intro-sub span{color:var(--soft)}
+  .intro-actions{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+  @keyframes introIn{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:none}}
+
   /* CSS fallback void (shown if WebGL fails) */
   #fallbackVoid{
     position:fixed;inset:0;z-index:0;display:none;
@@ -204,6 +221,20 @@
 
 <canvas id="gl"></canvas>
 <div id="fallbackVoid"></div>
+
+<!-- Cinematic entry: surfaces audio + provides the user gesture it needs -->
+<div id="intro" class="intro">
+  <div class="intro-card">
+    <span class="intro-mark"></span>
+    <div class="intro-eyebrow">Sound Horizon Systems</div>
+    <h2 class="intro-title">OBSIDIAN</h2>
+    <p class="intro-sub">An instrument that bends sound around a point of no return.<br><span>Best experienced with the score.</span></p>
+    <div class="intro-actions">
+      <button class="btn primary" data-enter="sound"><span class="sheen"></span>Enter with sound <span class="arr">♪</span></button>
+      <button class="btn" data-enter="muted"><span class="sheen"></span>Explore muted</button>
+    </div>
+  </div>
+</div>
 
 <!-- NAV -->
 <header class="nav">
@@ -441,6 +472,7 @@
   uniform float uResolve;  // 0 = full lensing, 1 = text resolved flat (scroll)
   uniform int   uOct;      // fbm octaves
   uniform int   uArc;      // 1 = draw over-the-top arc
+  uniform float uShockAge; // seconds since last audio tick (99 = none)
   uniform sampler2D uText;
 
   float hash21(vec2 p){ p=fract(p*vec2(123.34,345.45)); p+=dot(p,p+34.345); return fract(p.x*p.y); }
@@ -531,6 +563,13 @@
     float pr = exp(-pow((r-rs*1.07)/(rs*0.03),2.0));
     col += vec3(1.0,0.96,0.88)*pr*(2.2+0.5*uAmp);
 
+    // ---- audio shockwave: a ripple emitted from the hole on each tick ----
+    if(uShockAge < 1.5){
+      float ringR = rs*1.12 + uShockAge*0.55;
+      float sl = exp(-pow((r-ringR)/0.02, 2.0));
+      col += vec3(1.0,0.72,0.42) * sl * exp(-uShockAge*2.3) * 1.7;
+    }
+
     // event horizon — pure void
     float horizon=smoothstep(rs*1.0, rs*0.985, r);
     col *= (1.0-horizon);
@@ -576,7 +615,7 @@
   const vao=gl.createVertexArray(); gl.bindVertexArray(vao); // empty VAO for gl_VertexID draw
 
   const U={};
-  ['uRes','uTime','uHole','uRs','uLens','uSwirl','uTilt','uAmp','uResolve','uOct','uArc','uText']
+  ['uRes','uTime','uHole','uRs','uLens','uSwirl','uTilt','uAmp','uResolve','uOct','uArc','uShockAge','uText']
     .forEach(n=>U[n]=gl.getUniformLocation(prog,n));
 
   /* ---- sizing / quality ---- */
@@ -686,6 +725,7 @@
     gl.uniform1f(U.uResolve, resolve);
     gl.uniform1i(U.uOct, oct);
     gl.uniform1i(U.uArc, arc);
+    gl.uniform1f(U.uShockAge, AUDIO.playing ? AUDIO.shock() : 99.0);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, textTex); gl.uniform1i(U.uText, 0);
     gl.drawArrays(gl.TRIANGLES,0,3);
 
@@ -759,6 +799,7 @@
     let ctx=null, master=null, analyser=null, data=null, tickBuf=null;
     let padBus=null, groups=[], sub=null, built=false, playing=false;
     let cur=0, ci=0, level=0, schedTimer=null, nextChord=0, nextTick=0;
+    let arpGain=null, arpI=0, nextArp=0; const tickTimes=[];
 
     function makeIR(c){
       const sr=c.sampleRate, len=Math.floor(sr*3.4), b=c.createBuffer(2,len,sr);
@@ -795,6 +836,7 @@
       sub=c.createGain(); sub.gain.value=0.0001; sub.connect(out);
       const so=c.createOscillator(); so.type='sine'; so.frequency.setValueAtTime(nF(CHORDS[0].sub),t0); so.connect(sub); so.start(t0);
       sub.gain.exponentialRampToValueAtTime(0.09, t0+5.5); sub._osc=so;
+      arpGain=c.createGain(); arpGain.gain.setValueAtTime(0.0001,t0); arpGain.gain.exponentialRampToValueAtTime(0.34, t0+16); arpGain.connect(padBus); arpI=0;
       const lfo=c.createOscillator(); lfo.type='sine'; lfo.frequency.value=1/27;
       const lg=c.createGain(); lg.gain.value=0.3; lfo.connect(lg).connect(padBus.gain); lfo.start(t0);
     }
@@ -807,6 +849,7 @@
       cur=nx;
     }
     function tick(when){
+      tickTimes.push(when); if(tickTimes.length>20) tickTimes.shift();
       if(!tickBuf) return;
       const s=ctx.createBufferSource(); s.buffer=tickBuf;
       const bp=ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=1650; bp.Q.value=1.1;
@@ -814,10 +857,23 @@
       g.gain.exponentialRampToValueAtTime(0.12, when+0.004); g.gain.exponentialRampToValueAtTime(0.0001, when+0.09);
       s.connect(bp).connect(g); g.connect(padBus); s.start(when); s.stop(when+0.13);
     }
+    function arpNote(when, midi){
+      if(!arpGain) return;
+      const o=ctx.createOscillator(); o.type='triangle'; o.frequency.setValueAtTime(nF(midi),when);
+      const g=ctx.createGain(); g.gain.setValueAtTime(0.0001,when);
+      g.gain.exponentialRampToValueAtTime(0.07, when+0.018); g.gain.exponentialRampToValueAtTime(0.0001, when+0.45);
+      o.connect(g).connect(arpGain); o.start(when); o.stop(when+0.5);
+    }
+    function shock(){
+      if(!playing||!ctx) return 99;
+      const now=ctx.currentTime; for(let i=tickTimes.length-1;i>=0;i--){ if(tickTimes[i]<=now) return now-tickTimes[i]; }
+      return 99;
+    }
     function scheduler(){
       const ahead=ctx.currentTime+0.3;
       while(nextChord<ahead){ changeChord(nextChord); nextChord+=12; }
       while(nextTick<ahead){ tick(nextTick); nextTick+=1.5; }
+      while(nextArp<ahead){ const ch=CHORDS[ci].pad; arpNote(nextArp, ch[arpI%ch.length]+12); arpI++; nextArp+=0.5; }
     }
     async function start(){
       if(!built){
@@ -827,7 +883,7 @@
         analyser=ctx.createAnalyser(); analyser.fftSize=512; data=new Uint8Array(analyser.fftSize);
         master.connect(lim); lim.connect(ctx.destination); lim.connect(analyser);
         tickBuf=makeTick(ctx); build(ctx, master, ctx.currentTime+0.06);
-        nextChord=ctx.currentTime+12; nextTick=ctx.currentTime+1.5; schedTimer=setInterval(scheduler,90); built=true;
+        nextChord=ctx.currentTime+12; nextTick=ctx.currentTime+1.5; nextArp=ctx.currentTime+3; schedTimer=setInterval(scheduler,90); built=true;
       }
       if(ctx.state==='suspended') await ctx.resume();
       master.gain.cancelScheduledValues(ctx.currentTime);
@@ -855,6 +911,7 @@
       m.gain.setValueAtTime(0.0001,0); m.gain.exponentialRampToValueAtTime(0.85,1.6);
       for(let t=12;t<sec;t+=12) changeChord(t);
       for(let t=1.5;t<sec;t+=1.5) tick(t);
+      let ai=0; for(let t=3;t<sec;t+=0.5){ const ch=CHORDS[(Math.floor(t/12)+1)%CHORDS.length].pad; arpNote(t, ch[ai%ch.length]+12); ai++; }
       const buf=await oc.startRendering(); ctx=sc; tickBuf=st;
       const L=buf.getChannelData(0); let peak=0,rms=0,dc=0,zc=0,prev=0;
       for(let i=0;i<L.length;i++){ const v=L[i]; dc+=v; const a=Math.abs(v); if(a>peak)peak=a; rms+=v*v;
@@ -862,18 +919,32 @@
       rms=Math.sqrt(rms/L.length); dc/=L.length;
       return { peak:+peak.toFixed(3), rms:+rms.toFixed(4), dc:+dc.toFixed(4), clipped:peak>0.999, zeroCrossPerSec:Math.round(zc/sec) };
     }
-    return { start, stop, sample, renderTest, get playing(){return playing;} };
+    return { start, stop, sample, renderTest, shock, get playing(){return playing;}, get state(){return ctx?ctx.state:'none';} };
   })();
   window.__audioTest = (s)=>AUDIO.renderTest(s||6);
+  window.__AUDIO = AUDIO;
 
   const soundBtn=document.getElementById('sound');
+  function setSoundUI(on){ if(!soundBtn) return; soundBtn.classList.toggle('on',on); soundBtn.setAttribute('aria-pressed',on?'true':'false'); soundBtn.title='Ambient sound: '+(on?'on':'off'); }
   if(soundBtn){
     soundBtn.addEventListener('click', async ()=>{
       try{
-        if(!AUDIO.playing){ await AUDIO.start(); soundBtn.classList.add('on'); soundBtn.setAttribute('aria-pressed','true'); soundBtn.title='Ambient sound: on'; }
-        else { AUDIO.stop(); soundBtn.classList.remove('on'); soundBtn.setAttribute('aria-pressed','false'); soundBtn.title='Ambient sound: off'; }
+        if(!AUDIO.playing){ await AUDIO.start(); setSoundUI(true); }
+        else { AUDIO.stop(); setSoundUI(false); }
       }catch(e){ console.warn('[OBSIDIAN] audio unavailable', e); }
     });
+  }
+
+  // cinematic entry — guarantees the audio is discoverable and provides its gesture
+  const intro=document.getElementById('intro');
+  if(intro){
+    let done=false;
+    const enter=async (withSound)=>{
+      if(done) return; done=true;
+      if(withSound){ try{ await AUDIO.start(); setSoundUI(true); }catch(e){ console.warn('[OBSIDIAN] audio unavailable', e); } }
+      intro.classList.add('gone'); setTimeout(()=>{ intro.style.display='none'; }, 1000);
+    };
+    intro.querySelectorAll('[data-enter]').forEach(b=> b.addEventListener('click', ()=> enter(b.dataset.enter==='sound')));
   }
 })();
 </script>
