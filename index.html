@@ -497,24 +497,25 @@
     float bright=0.35+0.65*h2;
     float d=length(f);
     float core=smoothstep(0.34,0.0,d);
-    float base=0.5+0.5*sin(uTime*(0.5+1.3*h2)+h*43.0);
-    float tw=mix(0.8, 0.40+0.60*base, twAmt);                          // open sky twinkles; near-hole ring stays steady
+    float base=0.5+0.5*sin(uTime*(0.8+1.8*h2)+h*43.0);
+    float tw=mix(0.85, 0.25+0.75*base, twAmt);                         // open sky twinkles clearly; near-hole ring steady
     float spike=0.0;
-    if(h2>0.72){ spike=(smoothstep(0.17,0.0,abs(f.x))+smoothstep(0.17,0.0,abs(f.y)))*smoothstep(0.48,0.0,d)*0.4*twAmt; }
+    if(h2>0.72){ spike=(smoothstep(0.18,0.0,abs(f.x))+smoothstep(0.18,0.0,abs(f.y)))*smoothstep(0.5,0.0,d)*0.5*twAmt*(0.4+0.6*base); }
     return (core+spike)*bright*tw;
   }
   // accretion-disk field around the hole (elliptical, churning)
-  // accretion-disk emission (tilted plane) — returns colour * density
+  // accretion-disk emission (tilted plane) — differential orbital rotation + inward flow
   vec3 diskSample(vec2 d){
     vec2 e=vec2(d.x, d.y/max(uTilt,0.05));
     float rr=length(e);
-    float inner=uRs*1.9, outer=uRs*4.6;
-    float radial=smoothstep(inner, inner*1.16, rr)*smoothstep(outer, outer*0.70, rr);
+    float inner=uRs*1.9, outer=uRs*3.8;
+    float radial=smoothstep(inner, inner*1.16, rr)*smoothstep(outer, outer*0.66, rr);
     if(radial<=0.0) return vec3(0.0);             // outside the annulus: skip fbm
     float ang = rr>1e-5 ? atan(e.y,e.x) : 0.0;    // guard atan(0,0)
-    float w=fbm(vec2(ang*3.0 + uTime*0.05, rr*8.0));
-    float dens=radial*(0.28+1.05*fbm(vec2(ang*5.0 - uTime*0.04, rr*15.0)+w));
-    if(uArc==1) dens*=0.6+0.75*fbm(vec2(ang*9.0+uTime*0.03, rr*26.0));   // extra filaments (desktop)
+    float rang = ang + uTime*(0.12 + 0.09/(rr+0.1));              // orbits the hole, inner faster (Keplerian-ish)
+    float w=fbm(vec2(rang*3.0, rr*8.0 - uTime*0.2));              // matter spiralling inward
+    float dens=radial*(0.28+1.05*fbm(vec2(rang*5.0, rr*15.0)+w));
+    if(uArc==1) dens*=0.6+0.75*fbm(vec2(rang*9.0, rr*26.0));      // extra filaments (desktop)
     float temp=smoothstep(outer, inner, rr);      // 1 = inner, hottest
     vec3 col=mix(vec3(0.95,0.20,0.03), vec3(1.0,0.60,0.26), smoothstep(0.0,0.5,temp));
     col=mix(col, vec3(1.0,0.96,0.92), smoothstep(0.5,1.0,temp));
@@ -563,10 +564,6 @@
     float wrap = 0.30 + 0.95*abs(normalize(d+1e-4).y);       // strongest at top & bottom
     vec3 haloCol = mix(vec3(1.0,0.58,0.24), vec3(1.0,0.94,0.85), 0.5);
     col += haloCol * halo * wrap * beam * (1.5+0.4*uAmp);
-
-    // ---- broad soft glow (cheap bloom) ----
-    float glow = exp(-pow((r-rs*1.7)/(rs*1.25),2.0));
-    col += vec3(1.0,0.52,0.22) * glow * 0.13 * (0.6+beam*0.5);
 
     // ---- photon ring: razor-thin, very bright, at the shadow edge ----
     float pr = exp(-pow((r-rs*1.07)/(rs*0.03),2.0));
