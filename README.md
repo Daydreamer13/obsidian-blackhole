@@ -17,7 +17,7 @@ A full-screen fragment shader renders a Schwarzschild-style black hole with:
 
 ### Interaction
 - **Move the cursor** → steer the singularity; the hole tracks your pointer and idles above the wordmark.
-- **Press & hold** → raise the Schwarzschild radius; the hole *inhales* the layout, spiralling text and stars inward, then springs back.
+- **Press & hold** → the event horizon grows the longer you hold, spiralling everything inward until it swallows the whole screen to black — release for a rebound "rebirth" flash.
 - **Scroll** → lensing relaxes and the wordmark resolves into flat, legible type.
 
 It degrades gracefully: a CSS-only void fallback when WebGL2 is unavailable, a static poster under `prefers-reduced-motion`, and a mobile/touch path (drag to steer, touch-and-hold to collapse).
